@@ -1,4 +1,3 @@
-import { API_URL } from './config'; // adjust relative path per file's location
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 /*
