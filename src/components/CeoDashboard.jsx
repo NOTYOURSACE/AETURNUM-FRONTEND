@@ -3,7 +3,19 @@ import LeaveApprovalsPanel from './LeaveApprovalsPanel';
 
 const API_BASE =
     import.meta.env.VITE_API_URL ||
-    'http://localhost:5000';
+    'https://aeturnum-portal.onrender.com';
+
+// If VITE_API_URL wasn't set at build time, this falls back to the known
+// production backend below rather than localhost, so this component keeps
+// working even on hosts where the env var was never configured. Still
+// warn in the console since relying on the fallback isn't ideal long-term.
+if (!import.meta.env.VITE_API_URL) {
+    console.error(
+        '⚠️ VITE_API_URL is not set — falling back to the production backend URL. ' +
+        'Set VITE_API_URL in your hosting platform\'s environment variables so this ' +
+        'isn\'t hardcoded.'
+    );
+}
 
 // Marking present is only allowed from 6:55:00 PM until exactly 11:55:00 PM
 const PRESENT_WINDOW_START_MINUTES = 18 * 60 + 55; // 6:55 PM
@@ -86,6 +98,7 @@ export default function CeoDashboard({
     const [summary, setSummary] = useState(null);
     const [summaryError, setSummaryError] = useState('');
     const [teamMembers, setTeamMembers] = useState([]);
+    const [employeesError, setEmployeesError] = useState('');
     const [sales, setSales] = useState([]);
     const [salesError, setSalesError] = useState('');
     const [reviewingSaleId, setReviewingSaleId] = useState(null);
@@ -236,9 +249,18 @@ export default function CeoDashboard({
             // FIXED: Changed from /api/employees to /api/users to match your creation route
             fetch(`${API_BASE}/api/users`, { headers }).then(res => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                setEmployeesError('');
                 return res.json();
             }).catch((err) => {
                 console.error('Users fetch failed:', err);
+                // Previously this just returned [] with no visible trace, so a
+                // broken API_BASE (or a dead backend) silently looked identical
+                // to "zero employees in the database." Surface it instead.
+                setEmployeesError(
+                    err.message === 'Failed to fetch'
+                        ? `Could not reach ${API_BASE}/api/users — check VITE_API_URL and that the backend is running`
+                        : err.message || 'Request failed'
+                );
                 return [];
             }),
 
@@ -1480,6 +1502,23 @@ export default function CeoDashboard({
                                                     ? ''
                                                     : 's'}
                                             </div>
+
+                                            {employeesError && (
+                                                <div
+                                                    style={{
+                                                        marginTop: '8px',
+                                                        padding: '10px 13px',
+                                                        borderRadius: '7px',
+                                                        background: 'rgba(239, 68, 68, 0.1)',
+                                                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                                                        color: '#fca5a5',
+                                                        fontSize: '10px',
+                                                        maxWidth: '420px'
+                                                    }}
+                                                >
+                                                    Couldn't load employees: {employeesError}
+                                                </div>
+                                            )}
                                         </div>
 
                                         <input

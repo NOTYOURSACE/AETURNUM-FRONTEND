@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import LeaveApprovalsPanel from './LeaveApprovalsPanel';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://aeturnum-portal.onrender.com';
+if (!import.meta.env.VITE_API_URL) {
+  console.error('⚠️ VITE_API_URL is not set — falling back to the production backend URL. Set VITE_API_URL in your hosting platform\'s environment variables so this isn\'t hardcoded.');
+}
 
 // Every request needs to prove who's asking - the backend should trust this
 // token (not any agentId/employeeId we put in the URL) to decide whose data to return.
