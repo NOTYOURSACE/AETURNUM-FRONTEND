@@ -92,6 +92,13 @@ export default function CeoDashboard({
     const [loading, setLoading] = useState(true);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [activePage, setActivePage] = useState('Dashboard');
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+
+    // Close the mobile sidebar automatically whenever a nav item is picked
+    const goToPage = (label) => {
+        setActivePage(label);
+        setSidebarOpen(false);
+    };
     
     const [checkInTime, setCheckInTime] = useState(() => {
         const savedTime = localStorage.getItem('ceo_checkin_time');
@@ -732,9 +739,67 @@ export default function CeoDashboard({
                 input::placeholder, select::placeholder {
                     color: #64748b;
                 }
+
+                .ceo-mobile-menu-btn {
+                    display: none;
+                }
+
+                .ceo-sidebar-overlay {
+                    display: none;
+                }
+
+                /* ============ MOBILE LAYOUT ============ */
+                @media (max-width: 860px) {
+                    .ceo-shell {
+                        grid-template-columns: 1fr !important;
+                    }
+
+                    .ceo-sidebar {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        bottom: 0;
+                        width: 78vw;
+                        max-width: 280px;
+                        transform: translateX(-100%);
+                        transition: transform 0.25s ease;
+                        z-index: 100;
+                    }
+
+                    .ceo-sidebar.ceo-sidebar-open {
+                        transform: translateX(0);
+                    }
+
+                    .ceo-mobile-menu-btn {
+                        display: inline-flex !important;
+                    }
+
+                    .ceo-sidebar-overlay.ceo-sidebar-open {
+                        display: block;
+                        position: fixed;
+                        inset: 0;
+                        background: rgba(0, 0, 0, 0.55);
+                        z-index: 90;
+                    }
+
+                    .ceo-header {
+                        padding-left: 14px !important;
+                        padding-right: 14px !important;
+                        flex-wrap: wrap !important;
+                    }
+
+                    .ceo-content {
+                        padding: 16px !important;
+                    }
+
+                    table {
+                        font-size: 9px;
+                    }
+                }
             `}</style>
 
             <div
+                className="ceo-shell"
                 style={{
                     width: '100%',
                     height: '100%',
@@ -753,6 +818,7 @@ export default function CeoDashboard({
                 ====================================================== */}
 
                 <aside
+                    className={`ceo-sidebar${sidebarOpen ? ' ceo-sidebar-open' : ''}`}
                     style={{
                         height: '100%',
                         display: 'flex',
@@ -919,7 +985,7 @@ export default function CeoDashboard({
                                     <button
                                         key={item.label}
                                         onClick={() =>
-                                            setActivePage(item.label)
+                                            goToPage(item.label)
                                         }
                                         style={{
                                             width: '100%',
@@ -989,6 +1055,12 @@ export default function CeoDashboard({
                     </button>
                 </aside>
 
+                {/* Tap-outside-to-close backdrop, mobile only */}
+                <div
+                    className={`ceo-sidebar-overlay${sidebarOpen ? ' ceo-sidebar-open' : ''}`}
+                    onClick={() => setSidebarOpen(false)}
+                />
+
                 {/* =====================================================
                     RIGHT WORKSPACE
                 ====================================================== */}
@@ -1007,6 +1079,7 @@ export default function CeoDashboard({
                     {/* TOP HEADER */}
 
                     <header
+                        className="ceo-header"
                         style={{
                             minHeight: '62px',
                             padding: '10px 24px',
@@ -1021,6 +1094,29 @@ export default function CeoDashboard({
                             backdropFilter: 'blur(12px)'
                         }}
                     >
+
+                        {/* MOBILE MENU TOGGLE */}
+
+                        <button
+                            className="ceo-mobile-menu-btn"
+                            onClick={() => setSidebarOpen(true)}
+                            aria-label="Open menu"
+                            style={{
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '7px',
+                                border: '1px solid rgba(124, 58, 237, 0.4)',
+                                background: 'rgba(124, 58, 237, 0.12)',
+                                color: '#e2e8f0',
+                                fontSize: '16px',
+                                cursor: 'pointer',
+                                marginRight: '4px'
+                            }}
+                        >
+                            ☰
+                        </button>
 
                         {/* CHECK IN */}
 
@@ -1102,6 +1198,7 @@ export default function CeoDashboard({
                     ================================================== */}
 
                     <div
+                        className="ceo-content"
                         style={{
                             flex: 1,
                             overflowY: 'auto',

@@ -163,6 +163,8 @@ function TrendChart({ data }) {
 
 export default function QADashboard({ currentUser, onSignOut }) {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const goToTab = (id) => { setActiveTab(id); setSidebarOpen(false); };
   
   // Real-time clock tick
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
@@ -571,12 +573,40 @@ export default function QADashboard({ currentUser, onSignOut }) {
         .qa-root button:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
         .qa-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 22px; }
         .qa-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); flex: 1; }
+
+        .qa-mobile-menu-btn { display: none; }
+        .qa-sidebar-overlay { display: none; }
+
+        @media (max-width: 860px) {
+          .qa-root { grid-template-columns: 1fr !important; }
+          .qa-sidebar {
+            position: fixed;
+            top: 0; left: 0; bottom: 0;
+            width: 78vw;
+            max-width: 280px;
+            transform: translateX(-100%);
+            transition: transform 0.25s ease;
+            z-index: 100;
+          }
+          .qa-sidebar.qa-sidebar-open { transform: translateX(0); }
+          .qa-mobile-menu-btn { display: inline-flex !important; }
+          .qa-sidebar-overlay.qa-sidebar-open {
+            display: block;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 90;
+          }
+          .qa-header { padding-left: 14px !important; padding-right: 14px !important; flex-wrap: wrap !important; }
+          .qa-content { padding: 16px !important; }
+          table { font-size: 9px; }
+        }
       `}</style>
 
       <div className="qa-root" style={{ display: 'grid', gridTemplateColumns: '270px 1fr', width: '100%', height: '100%', background: 'rgba(10, 12, 20, 0.35)', backdropFilter: 'blur(25px)', border: 'none', borderRadius: '0', boxShadow: 'none', overflow: 'hidden', margin: 0, boxSizing: 'border-box', position: 'relative' }}>
 
         {/* LEFT SIDEBAR */}
-        <aside style={{ background: 'rgba(12, 14, 24, 0.85)', backdropFilter: 'blur(20px)', borderRight: '1px solid rgba(124, 58, 237, 0.25)', padding: '24px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', zIndex: 2, height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
+        <aside className={`qa-sidebar${sidebarOpen ? ' qa-sidebar-open' : ''}`} style={{ background: 'rgba(12, 14, 24, 0.85)', backdropFilter: 'blur(20px)', borderRight: '1px solid rgba(124, 58, 237, 0.25)', padding: '24px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', zIndex: 2, height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
           <div>
             <div style={{ textAlign: 'center', marginBottom: '24px' }}>
               <h2 style={{ fontSize: '18px', fontWeight: '900', letterSpacing: '3px', background: 'linear-gradient(135deg, #fff 20%, #c4b5fd 70%, #7c3aed 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
@@ -614,7 +644,7 @@ export default function QADashboard({ currentUser, onSignOut }) {
               ].map((item) => (
                 <button 
                   key={item.id}
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => goToTab(item.id)}
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
@@ -647,11 +677,14 @@ export default function QADashboard({ currentUser, onSignOut }) {
           </button>
         </aside>
 
+        <div className={`qa-sidebar-overlay${sidebarOpen ? ' qa-sidebar-open' : ''}`} onClick={() => setSidebarOpen(false)} />
+
         {/* RIGHT MAIN CONTENT AREA */}
         <main style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', zIndex: 2, boxSizing: 'border-box' }}>
           
           {/* Top Header Bar */}
-          <header style={{ padding: '16px 35px', background: 'rgba(12, 14, 24, 0.65)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(124, 58, 237, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+          <header className="qa-header" style={{ padding: '16px 35px', background: 'rgba(12, 14, 24, 0.65)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(124, 58, 237, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+            <button className="qa-mobile-menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu" style={{ alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '7px', border: '1px solid rgba(124, 58, 237, 0.4)', background: 'rgba(124, 58, 237, 0.12)', color: '#e2e8f0', fontSize: '16px', cursor: 'pointer', marginRight: '4px' }}>☰</button>
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
               <button 
                 onClick={handleCheckIn}
@@ -701,7 +734,7 @@ export default function QADashboard({ currentUser, onSignOut }) {
           </header>
 
           {/* Main Content Body */}
-          <div style={{ width: '100%', flex: 1, padding: '30px 40px', boxSizing: 'border-box', overflowY: 'auto' }}>
+          <div className="qa-content" style={{ width: '100%', flex: 1, padding: '30px 40px', boxSizing: 'border-box', overflowY: 'auto' }}>
             <div style={{ width: '100%', maxWidth: '100%' }}>
               
               {/* Dashboard Tab */}
