@@ -586,7 +586,7 @@ export default function QADashboard({ currentUser, onSignOut }) {
             max-width: 280px;
             transform: translateX(-100%);
             transition: transform 0.25s ease;
-            z-index: 100;
+            z-index: 100 !important;
           }
           .qa-sidebar.qa-sidebar-open { transform: translateX(0); }
           .qa-mobile-menu-btn { display: inline-flex !important; }

@@ -763,7 +763,7 @@ export default function CeoDashboard({
                         max-width: 280px;
                         transform: translateX(-100%);
                         transition: transform 0.25s ease;
-                        z-index: 100;
+                        z-index: 100 !important;
                     }
 
                     .ceo-sidebar.ceo-sidebar-open {
