@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import LeaveApprovalsPanel from './LeaveApprovalsPanel';
+import { useState, useEffect, useCallback } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -46,154 +45,8 @@ const isWithinPresentWindow = (date = new Date()) => {
   );
 };
 
-/* ---------------- Quality Overview (from the QA dashboard) ---------------- */
-const EVALUATIONS_URL = `${API_BASE}/api/evaluations`; // GET all evaluations
-
-// Standards a call is rated on. "critical" items are compliance rules: failing one makes the whole call a critical fail.
-const CHECKS = [
-  { id: 'tcpa', label: 'TCPA verbal consent captured and stated clearly', critical: true },
-  { id: 'cms', label: 'CMS disclosures read in full', critical: true },
-  { id: 'identity', label: 'Customer identity verified before discussing plan details', critical: true },
-  { id: 'phi', label: 'Protected health information handled securely', critical: true },
-  { id: 'needs', label: 'Asked about doctors and medications before recommending a plan' },
-  { id: 'accuracy', label: 'Plan and eligibility details stated accurately' },
-  { id: 'objections', label: 'Handled objections without pressure' },
-  { id: 'tone', label: 'Professional tone and proper call closing' }
-];
-
-/* ---------- colors: same palette as AgentDashboard ---------- */
-const C = { text: '#cbd5e1', muted: '#94a3b8', dim: '#64748b', lav: '#c4b5fd', purple: '#7c3aed', line: 'rgba(124, 58, 237, 0.3)', soft: 'rgba(124, 58, 237, 0.15)' };
-const T = {
-  pass: { fg: '#4ade80', bg: 'rgba(34, 197, 94, 0.2)', bd: 'rgba(34, 197, 94, 0.4)' },
-  warn: { fg: '#facc15', bg: 'rgba(234, 179, 8, 0.2)', bd: 'rgba(234, 179, 8, 0.4)' },
-  fail: { fg: '#fca5a5', bg: 'rgba(239, 68, 68, 0.2)', bd: 'rgba(239, 68, 68, 0.4)' },
-  none: { fg: '#94a3b8', bg: 'rgba(100, 116, 139, 0.2)', bd: 'rgba(100, 116, 139, 0.35)' }
-};
-const scoreTone = (n) => (n >= 90 ? T.pass : n >= 75 ? T.warn : T.fail);
-const resultFor = (score, criticalFail) => (criticalFail ? 'Critical fail' : score >= 90 ? 'Excellent' : score >= 75 ? 'Good' : 'Needs coaching');
-
-const pad = (n) => String(n).padStart(2, '0');
-const isoDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const weekStart = (d) => {
-  const c = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  c.setDate(c.getDate() - ((c.getDay() + 6) % 7));
-  return isoDate(c);
-};
-const avg = (list) => (list.length ? Math.round(list.reduce((a, b) => a + b, 0) / list.length) : null);
-const num = (e) => Number(e.score) || 0;
-const isCritical = (e) => Boolean(e.criticalFail) || e.result === 'Critical fail';
-
-/* ---------- shared styles (copied from AgentDashboard, defined once) ---------- */
-const S = {
-  card: { background: 'rgba(18, 21, 36, 0.9)', border: `1px solid ${C.line}`, borderRadius: '10px', padding: '24px' },
-  inner: { background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.25)', borderRadius: '8px', padding: '16px' },
-  input: { background: 'rgba(8, 10, 17, 0.8)', border: `1px solid ${C.line}`, color: '#fff', padding: '10px 12px', borderRadius: '6px', fontSize: '12px', fontFamily: 'inherit' },
-  label: { fontSize: '11px', color: C.lav, fontWeight: '700' },
-  h3: { fontSize: '15px', color: '#fff', margin: 0, fontWeight: '800' },
-  sub: { margin: '4px 0 0', fontSize: '11px', color: C.muted, lineHeight: 1.5 },
-  table: { width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '11px' },
-  thead: { borderBottom: `1px solid ${C.line}`, color: C.lav, fontWeight: '800' },
-  row: { borderBottom: `1px solid ${C.soft}`, color: C.text },
-  primary: { background: C.purple, border: 'none', color: '#fff', padding: '10px 24px', borderRadius: '6px', fontWeight: '700', fontSize: '12px', letterSpacing: '0.5px' },
-  ghost: { background: 'transparent', color: C.lav, border: '1px solid rgba(124, 58, 237, 0.4)', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '10px', fontWeight: '800' }
-};
-
-function Badge({ tone, children }) {
-  return (
-    <span style={{ display: 'inline-block', padding: '4px 10px', borderRadius: '6px', fontWeight: '800', fontSize: '10px', background: tone.bg, color: tone.fg, border: `1px solid ${tone.bd}`, whiteSpace: 'nowrap' }}>
-      {children}
-    </span>
-  );
-}
-
-function Notice({ type, children }) {
-  const tone = type === 'success' ? T.pass : T.fail;
-  return (
-    <div role="status" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: '700', background: tone.bg, border: `1px solid ${tone.bd}`, color: tone.fg }}>
-      {children}
-    </div>
-  );
-}
-
-function Empty({ children }) {
-  return (
-    <div style={{ padding: '30px', background: 'rgba(8, 10, 17, 0.6)', borderRadius: '8px', textAlign: 'center' }}>
-      <p style={{ margin: 0, fontSize: '12px', color: C.muted }}>{children}</p>
-    </div>
-  );
-}
-
-function ScoreRing({ value, size = 150, tone }) {
-  const r = size / 2 - 10;
-  const c = 2 * Math.PI * r;
-  const pct = value === null ? 0 : Math.min(value, 100) / 100;
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={value === null ? 'No score yet' : `Score ${value}%`}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(124, 58, 237, 0.2)" strokeWidth="10" />
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={tone.fg} strokeWidth="10" strokeLinecap="round" strokeDasharray={`${c * pct} ${c}`} transform={`rotate(-90 ${size / 2} ${size / 2})`} style={{ transition: 'stroke-dasharray 0.4s ease' }} />
-      <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" fontSize={size * 0.26} fontWeight="800" fill="#fff">{value === null ? '—' : `${value}%`}</text>
-    </svg>
-  );
-}
-
-function TrendChart({ data }) {
-  const W = 440, H = 190, pl = 34, pr = 14, pt = 18, pb = 30;
-  const iw = W - pl - pr, ih = H - pt - pb;
-  const x = (i) => pl + (data.length === 1 ? iw / 2 : (i / (data.length - 1)) * iw);
-  const y = (v) => pt + ih - (v / 100) * ih;
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto' }} role="img" aria-label="Weekly average quality score">
-      {[{ v: 90, c: T.pass.fg }, { v: 75, c: T.warn.fg }, { v: 50, c: C.dim }].map((g) => (
-        <g key={g.v}>
-          <line x1={pl} x2={W - pr} y1={y(g.v)} y2={y(g.v)} stroke={g.c} strokeOpacity="0.45" strokeDasharray="4 4" />
-          <text x={pl - 6} y={y(g.v)} textAnchor="end" dominantBaseline="central" fontSize="10" fill={C.muted}>{g.v}</text>
-        </g>
-      ))}
-      {data.length > 1 && <polyline fill="none" stroke="#a78bfa" strokeWidth="2.5" strokeLinejoin="round" points={data.map((d, i) => `${x(i)},${y(d.avg)}`).join(' ')} />}
-      {data.map((d, i) => (
-        <g key={d.label}>
-          <title>{`${d.label}: ${d.avg}% across ${d.n} call${d.n === 1 ? '' : 's'}`}</title>
-          <circle cx={x(i)} cy={y(d.avg)} r="4.5" fill="#0c0e18" stroke="#a78bfa" strokeWidth="2.5" />
-          <text x={x(i)} y={y(d.avg) - 11} textAnchor="middle" fontSize="10" fontWeight="800" fill="#fff">{d.avg}</text>
-          <text x={x(i)} y={H - 8} textAnchor="middle" fontSize="10" fill={C.muted}>{d.label}</text>
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-/* ---------------- Sales Count (sales agents have posted) ---------------- */
-const SALES_URL = `${API_BASE}/api/sales`; // GET every posted sale
-const USERS_URL = `${API_BASE}/api/users`; // GET people, so agents with zero sales still show up
-const SALE_APPROVED = 'Approved by QA'; // same values the QA and Agent dashboards use
-const SALE_REJECTED = 'Rejected';
-const saleStatus = (sale) => (sale.qaStatus === SALE_APPROVED ? 'approved' : sale.qaStatus === SALE_REJECTED ? 'rejected' : 'pending');
-const saleWhen = (sale) => {
-  for (const v of [sale.createdAt, sale.postedAt, sale.timestamp, sale.date]) {
-    if (!v) continue;
-    const d = /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? new Date(`${v}T00:00:00`) : new Date(v);
-    if (!Number.isNaN(d.getTime())) return d;
-  }
-  return null;
-};
-const emptyCount = () => ({ total: 0, approved: 0, pending: 0, rejected: 0 });
-const bumpCount = (c, status) => { c.total += 1; c[status] += 1; };
-const SALE_PERIODS = [
-  { id: 'today', label: 'Today' },
-  { id: 'week', label: 'This Week' },
-  { id: 'month', label: 'This Month' }
-];
-const SALE_COLS = [
-  { id: 'total', label: 'Posted', color: '#fff' },
-  { id: 'approved', label: 'Approved', color: T.pass.fg },
-  { id: 'pending', label: 'Pending', color: T.warn.fg },
-  { id: 'rejected', label: 'Rejected', color: T.fail.fg }
-];
-
-export default function TeamLeadDashboard({ currentUser, onSignOut }) {
+export default function AgentDashboard({ currentUser, onSignOut }) {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const goToTab = (id) => { setActiveTab(id); setSidebarOpen(false); };
   
   // Real-time clock tick
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
@@ -207,14 +60,14 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
     return () => clearInterval(timer);
   }, []);
 
-  const employeeId = currentUser?.employeeId || currentUser?.empId || currentUser?.id?.substring(0, 6)?.toUpperCase() || 'TL-001';
-  const userName = currentUser?.name || 'Team Lead';
-  const userRole = currentUser?.role || 'Team Lead';
-  const userEmail = currentUser?.email || 'teamlead@aeturnum.internal';
+  const employeeId = currentUser?.employeeId || currentUser?.empId || currentUser?.id?.substring(0, 6)?.toUpperCase() || 'EMP-001';
+  const userName = currentUser?.name || 'Valued Agent';
+  const userRole = currentUser?.role || 'Sales Agent';
+  const userEmail = currentUser?.email || 'agent@aeturnum.internal';
   const shiftTiming = '07:00 PM - 12:00 AM';
 
   const getInitials = (name) => {
-    if (!name) return 'TL';
+    if (!name) return 'AG';
     const parts = name.trim().split(' ');
     if (parts.length >= 2) {
       return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
@@ -223,94 +76,115 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
   };
   const userInitials = getInitials(currentUser?.name);
 
-  const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
-  const attendanceKey = `zyre_attendance_logs_${employeeId}`;
+  const todayStr = new Date().toISOString().split('T')[0];
 
-  // Password Change State & Handler
-  const [passwordData, setPasswordData] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: ''
-  });
-  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
-  const [passwordMsg, setPasswordMsg] = useState({ type: '', text: '' });
-
-  const handlePasswordChangeInput = (e) => {
-    const { name, value } = e.target;
-    setPasswordData({ ...passwordData, [name]: value });
-  };
-
-  const handlePasswordSubmit = async (e) => {
-    e.preventDefault();
-    setPasswordMsg({ type: '', text: '' });
-
-    if (passwordData.newPassword !== passwordData.confirmPassword) {
-      setPasswordMsg({ type: 'error', text: 'New passwords do not match.' });
-      return;
-    }
-
-    if (passwordData.newPassword.length < 6) {
-      setPasswordMsg({ type: 'error', text: 'Password must be at least 6 characters long.' });
-      return;
-    }
-
-    setPasswordSubmitting(true);
-
-    try {
-      const userId = currentUser?._id || currentUser?.id;
-      if (!userId) throw new Error('Could not determine your account ID.');
-
-      // Actually updates the account record in the database (same endpoint the
-      // CEO dashboard uses to set an employee's password) - this used to just
-      // email a notification and never touch the real password.
-      const response = await fetch(`${API_BASE}/api/users/${userId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({
-          currentPassword: passwordData.currentPassword,
-          password: passwordData.newPassword
-        })
-      });
-
-      const data = await parseJsonResponse(response);
-
-      if (response.ok) {
-        setPasswordMsg({ type: 'success', text: 'Your password has been updated.' });
-        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
-      } else {
-        setPasswordMsg({ type: 'error', text: data.error || 'Failed to update your password. Check your current password and try again.' });
-      }
-    } catch (err) {
-      setPasswordMsg({ type: 'error', text: err.message || 'An error occurred while updating your password.' });
-    } finally {
-      setPasswordSubmitting(false);
-    }
-  };
-
-  // Attendance now lives in the database (requires GET/POST
-  // /api/attendance/agent/:id on the backend, same convention as
-  // /api/sales/agent/:id) instead of a per-browser localStorage key.
+  // Attendance now lives in the database (Note: requires a matching
+  // GET/POST /api/attendance/agent/:id route on the backend, following the
+  // same convention as /api/sales/agent/:id and /api/evaluations/agent/:id -
+  // this used to be localStorage-only, which meant it wasn't visible to
+  // managers and could be edited from devtools).
   const [attendanceLogs, setAttendanceLogs] = useState([]);
   const [loadingAttendance, setLoadingAttendance] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
+
     async function loadAttendance() {
       try {
         const agentId = currentUser?.id || currentUser?.username || employeeId;
         if (!agentId) return;
+
         const res = await fetch(`${API_BASE}/api/attendance/agent/${agentId}`, { headers: authHeaders() });
         const data = await parseJsonResponse(res);
-        if (isMounted && data.success && data.logs) setAttendanceLogs(data.logs);
+
+        if (isMounted && data.success && data.logs) {
+          setAttendanceLogs(data.logs);
+        }
       } catch (err) {
         console.error('Failed to load attendance from database:', err);
       } finally {
         if (isMounted) setLoadingAttendance(false);
       }
     }
+
     loadAttendance();
     return () => { isMounted = false; };
   }, [currentUser, employeeId]);
+
+  // Sales Achieved State (Live from MongoDB backend)
+  const [salesAchievedList, setSalesAchievedList] = useState([]);
+  const [loadingSales, setLoadingSales] = useState(true);
+
+  // Refactored with isMounted protection to satisfy React hook rules cleanly
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadMySales() {
+      try {
+        const agentId = currentUser?.id || currentUser?.username || employeeId;
+        if (!agentId) return;
+
+        const res = await fetch(`${API_BASE}/api/sales/agent/${agentId}`, { headers: authHeaders() });
+        const data = await parseJsonResponse(res);
+
+        if (isMounted && data.success && data.sales) {
+          setSalesAchievedList(data.sales);
+        }
+      } catch (err) {
+        console.error('Failed to load sales from database:', err);
+      } finally {
+        if (isMounted) {
+          setLoadingSales(false);
+        }
+      }
+    }
+
+    loadMySales();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser, employeeId]);
+
+  // QA Quality Call Evaluations State (Live from MongoDB backend)
+  const [qaScoresList, setQaScoresList] = useState([]);
+  const [loadingEvals, setLoadingEvals] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadLiveEvaluations() {
+      try {
+        const agentId = currentUser?.id || currentUser?.username || employeeId;
+        if (!agentId) return;
+
+        const res = await fetch(`${API_BASE}/api/evaluations/agent/${agentId}`, { headers: authHeaders() });
+        const data = await parseJsonResponse(res);
+        
+        if (isMounted && data.success && data.evaluations) {
+          setQaScoresList(data.evaluations);
+        }
+      } catch (err) {
+        console.error('Failed to fetch live QA evaluations from backend:', err);
+      } finally {
+        if (isMounted) {
+          setLoadingEvals(false);
+        }
+      }
+    }
+
+    if (currentUser || employeeId) {
+      loadLiveEvaluations();
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser, employeeId]);
+
+  const averageQaScore = qaScoresList.length > 0 
+    ? Math.round(qaScoresList.reduce((acc, curr) => acc + (Number(curr.score) || 0), 0) / qaScoresList.length)
+    : 0;
 
   const hasCheckedIn = attendanceLogs.some(r => r.date === todayStr && r.status === 'Available');
 
@@ -384,6 +258,145 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
     }
   };
 
+  // Medicare Campaign Sales Form State
+  const [medicareData, setMedicareData] = useState({
+    clientName: '',
+    clientPhone: '',
+    clientEmail: '',
+    medicarePart: 'Part A & B',
+    currentPlan: 'Original Medicare',
+    primaryDoctor: '',
+    medicationsList: '',
+    saleAmount: '',
+    tcpaConsent: false,
+    notes: ''
+  });
+  const [saleSubmitting, setSaleSubmitting] = useState(false);
+  const [saleMsg, setSaleMsg] = useState({ type: '', text: '' });
+
+  const handleMedicareChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setMedicareData({ 
+      ...medicareData, 
+      [name]: type === 'checkbox' ? checked : value 
+    });
+  };
+
+  const handleMedicareSubmit = async (e) => {
+    e.preventDefault();
+    if (!medicareData.tcpaConsent) {
+      setSaleMsg({ type: 'error', text: 'TCPA Verbal Consent must be confirmed before posting the sale.' });
+      return;
+    }
+
+    setSaleSubmitting(true);
+    setSaleMsg({ type: '', text: '' });
+
+    try {
+      const response = await fetch(`${API_BASE}/api/sales`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          agentId: employeeId,
+          agentName: userName,
+          clientName: medicareData.clientName,
+          clientPhone: medicareData.clientPhone,
+          packageTier: `${medicareData.medicarePart} (${medicareData.currentPlan})`,
+          saleAmount: medicareData.saleAmount,
+          notes: medicareData.notes
+        })
+      });
+
+      const data = await parseJsonResponse(response);
+
+      if (data.success) {
+        setSalesAchievedList(prev => [data.sale, ...prev]);
+
+        setSaleMsg({ type: 'success', text: 'Medicare Sale successfully posted and sent to QA for review!' });
+        setMedicareData({
+          clientName: '',
+          clientPhone: '',
+          clientEmail: '',
+          medicarePart: 'Part A & B',
+          currentPlan: 'Original Medicare',
+          primaryDoctor: '',
+          medicationsList: '',
+          saleAmount: '',
+          tcpaConsent: false,
+          notes: ''
+        });
+      } else {
+        setSaleMsg({ type: 'error', text: data.error || 'Failed to post Medicare sale. Please check your connection.' });
+      }
+    } catch (err) {
+      console.error('Sale submission error:', err);
+      setSaleMsg({ type: 'error', text: err.message || 'An error occurred while submitting the form.' });
+    } finally {
+      setSaleSubmitting(false);
+    }
+  };
+
+  // Password Change State & Handler
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
+  const [passwordMsg, setPasswordMsg] = useState({ type: '', text: '' });
+
+  const handlePasswordChangeInput = (e) => {
+    const { name, value } = e.target;
+    setPasswordData({ ...passwordData, [name]: value });
+  };
+
+  const handlePasswordSubmit = async (e) => {
+    e.preventDefault();
+    setPasswordMsg({ type: '', text: '' });
+
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      setPasswordMsg({ type: 'error', text: 'New passwords do not match.' });
+      return;
+    }
+
+    if (passwordData.newPassword.length < 6) {
+      setPasswordMsg({ type: 'error', text: 'Password must be at least 6 characters long.' });
+      return;
+    }
+
+    setPasswordSubmitting(true);
+
+    try {
+      const userId = currentUser?._id || currentUser?.id;
+      if (!userId) throw new Error('Could not determine your account ID.');
+
+      // Actually updates the account record in the database (same endpoint the
+      // CEO dashboard uses to set an employee's password) - this used to just
+      // email a notification and lie about having updated anything.
+      const response = await fetch(`${API_BASE}/api/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          currentPassword: passwordData.currentPassword,
+          password: passwordData.newPassword
+        })
+      });
+
+      const data = await parseJsonResponse(response);
+
+      if (response.ok) {
+        setPasswordMsg({ type: 'success', text: 'Your password has been updated.' });
+        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      } else {
+        setPasswordMsg({ type: 'error', text: data.error || 'Failed to update your password. Check your current password and try again.' });
+      }
+    } catch (err) {
+      setPasswordMsg({ type: 'error', text: err.message || 'An error occurred while updating your password.' });
+    } finally {
+      setPasswordSubmitting(false);
+    }
+  };
+
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [filteredResults, setFilteredResults] = useState(null);
@@ -419,7 +432,6 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
 
   /* ---------------- Approvals (leave requests) ---------------- */
   const leaveEmployeeId = currentUser?.id || currentUser?.employeeId || currentUser?.username || employeeId;
-  const isTeamLead = /team\s*lead/i.test(userRole);
 
   const emptyLeaveForm = { leaveType: 'Casual Leave', fromDate: '', toDate: '', reason: '' };
   const [leaveForm, setLeaveForm] = useState(emptyLeaveForm);
@@ -434,7 +446,6 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
       ? Math.round((new Date(leaveForm.toDate) - new Date(leaveForm.fromDate)) / 86400000) + 1
       : 0;
 
-  // State is only set inside promise callbacks (never synchronously), so it is safe to call from an effect
   const fetchMyLeaves = useCallback(
     () =>
       fetch(`${API_BASE}/api/leave-requests/employee/${encodeURIComponent(leaveEmployeeId)}`, { headers: authHeaders() })
@@ -452,7 +463,6 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
     [leaveEmployeeId]
   );
 
-  // Load the employee's requests whenever the Approvals tab is opened
   useEffect(() => {
     if (activeTab === 'approvals') fetchMyLeaves();
   }, [activeTab, fetchMyLeaves]);
@@ -461,7 +471,6 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
     const { name, value } = e.target;
     setLeaveForm((prev) => {
       const next = { ...prev, [name]: value };
-      // keep "To" from ending up before "From"
       if (name === 'fromDate' && next.toDate && next.toDate < value) next.toDate = value;
       return next;
     });
@@ -502,181 +511,6 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
     }
   };
 
-  /* ---------------- Quality Overview: data ---------------- */
-  const [evals, setEvals] = useState([]);
-  const [evalsLoading, setEvalsLoading] = useState(true);
-  const [evalsError, setEvalsError] = useState('');
-
-  const loadEvals = useCallback(async () => {
-    setEvalsLoading(true);
-    try {
-      const data = await fetch(EVALUATIONS_URL, { headers: authHeaders() }).then(parseJsonResponse);
-      if (data.success && data.evaluations) setEvals(data.evaluations);
-      setEvalsError('');
-    } catch (err) {
-      console.error('Could not load evaluations:', err);
-      setEvalsError(err.message);
-    } finally {
-      setEvalsLoading(false);
-    }
-  }, []);
-
-  // Refresh the numbers whenever the Quality Overview tab is opened
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (activeTab === 'overview') loadEvals();
-  }, [activeTab, loadEvals]);
-
-  /* ---------------- sales count: what each agent has posted ---------------- */
-  const [sales, setSales] = useState([]);
-  const [salesLoading, setSalesLoading] = useState(true);
-  const [salesError, setSalesError] = useState('');
-  const [agentDir, setAgentDir] = useState([]);
-  const [salesAgent, setSalesAgent] = useState('all');
-
-  const loadSales = useCallback(async () => {
-    setSalesLoading(true);
-    try {
-      const data = await fetch(SALES_URL, { headers: authHeaders() }).then(parseJsonResponse);
-      setSales(data.sales || (Array.isArray(data) ? data : []));
-      setSalesError('');
-    } catch (err) {
-      console.error('Could not load posted sales:', err);
-      setSalesError(err.message);
-    } finally {
-      setSalesLoading(false);
-    }
-
-    // Optional: lets agents with zero sales appear in the table too
-    try {
-      const data = await fetch(USERS_URL, { headers: authHeaders() }).then(parseJsonResponse);
-      const list = data.users || data.agents || (Array.isArray(data) ? data : []);
-      setAgentDir(
-        list
-          .filter((u) => /agent|csr/i.test(u.role || '') && !/team\s*lead|quality|auditor/i.test(u.role || ''))
-          .map((u) => ({ id: u.id || u.username || u.employeeId || u._id, name: u.name || u.username || '' }))
-          .filter((u) => u.id)
-      );
-    } catch {
-      setAgentDir([]);
-    }
-  }, []);
-
-  // Refresh the numbers whenever the Sales Count tab is opened
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (activeTab === 'sales') loadSales();
-  }, [activeTab, loadSales]);
-
-  const salesStats = useMemo(() => {
-    const now = new Date();
-    const todayKey = isoDate(now);
-    const weekKey = weekStart(now);
-    const monthKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
-    const rows = new Map();
-    const ensure = (id, name) => {
-      if (!rows.has(id)) rows.set(id, { id, name: name || String(id), today: emptyCount(), week: emptyCount(), month: emptyCount() });
-      else if (name && rows.get(id).name === String(id)) rows.get(id).name = name;
-      return rows.get(id);
-    };
-    agentDir.forEach((a) => ensure(a.id, a.name));
-
-    const totals = { today: emptyCount(), week: emptyCount(), month: emptyCount() };
-    let undated = 0;
-    sales.forEach((sl) => {
-      const id = sl.agentId || sl.agentName;
-      if (!id) return;
-      const row = ensure(id, sl.agentName);
-      const when = saleWhen(sl);
-      if (!when) { undated += 1; return; }
-      const status = saleStatus(sl);
-      if (isoDate(when) === todayKey) { bumpCount(row.today, status); bumpCount(totals.today, status); }
-      if (weekStart(when) === weekKey) { bumpCount(row.week, status); bumpCount(totals.week, status); }
-      if (`${when.getFullYear()}-${pad(when.getMonth() + 1)}` === monthKey) { bumpCount(row.month, status); bumpCount(totals.month, status); }
-    });
-
-    const list = [...rows.values()].sort((a, b) => b.month.total - a.month.total || a.name.localeCompare(b.name));
-    return { list, totals, undated };
-  }, [sales, agentDir]);
-
-  // Day-by-day counts for the last 14 days, for one agent or everyone
-  const dailyRows = useMemo(() => {
-    const days = [];
-    for (let i = 0; i < 14; i += 1) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      days.push({ key: isoDate(d), label: d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }), counts: emptyCount() });
-    }
-    const byKey = new Map(days.map((d) => [d.key, d]));
-    sales.forEach((sl) => {
-      if (salesAgent !== 'all' && String(sl.agentId || sl.agentName) !== salesAgent) return;
-      const when = saleWhen(sl);
-      const slot = when && byKey.get(isoDate(when));
-      if (slot) bumpCount(slot.counts, saleStatus(sl));
-    });
-    return days;
-  }, [sales, salesAgent]);
-
-  /* ---------------- overview numbers ---------------- */
-  const overall = useMemo(() => {
-    const thisWeek = weekStart(new Date());
-    const weekEvals = evals.filter((e) => { const d = new Date(e.date); return !Number.isNaN(d.getTime()) && weekStart(d) === thisWeek; });
-    return {
-      avg: avg(evals.map(num)),
-      total: evals.length,
-      week: weekEvals.length,
-      weekAvg: avg(weekEvals.map(num)),
-      critical: evals.filter(isCritical).length,
-      passRate: evals.length ? Math.round((evals.filter((e) => !isCritical(e) && num(e) >= 75).length / evals.length) * 100) : null
-    };
-  }, [evals]);
-
-  const trend = useMemo(() => {
-    const m = new Map();
-    evals.forEach((e) => {
-      const d = new Date(e.date);
-      if (Number.isNaN(d.getTime())) return;
-      const k = weekStart(d);
-      m.set(k, [...(m.get(k) || []), num(e)]);
-    });
-    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-8).map(([k, list]) => ({
-      label: new Date(`${k}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
-      avg: avg(list),
-      n: list.length
-    }));
-  }, [evals]);
-
-  const missed = useMemo(() => {
-    const tally = Object.fromEntries(CHECKS.map((c) => [c.id, { fail: 0, total: 0 }]));
-    evals.forEach((e) => {
-      if (!Array.isArray(e.checklist)) return;
-      e.checklist.forEach((item) => {
-        if (!tally[item.id] || (item.result !== 'pass' && item.result !== 'fail')) return;
-        tally[item.id].total += 1;
-        if (item.result === 'fail') tally[item.id].fail += 1;
-      });
-    });
-    return CHECKS.map((c) => ({ ...c, ...tally[c.id], rate: tally[c.id].total ? Math.round((tally[c.id].fail / tally[c.id].total) * 100) : null }))
-      .filter((c) => c.total > 0)
-      .sort((a, b) => b.rate - a.rate);
-  }, [evals]);
-
-  const agentRows = useMemo(() => {
-    const map = new Map();
-    evals.forEach((e) => {
-      const id = e.agentId || e.agentName;
-      if (!id) return;
-      const r = map.get(id) || { id, name: e.agentName || id, scores: [], critical: 0, last: '' };
-      r.scores.push(num(e));
-      if (isCritical(e)) r.critical += 1;
-      if ((e.date || '') > r.last) r.last = e.date;
-      map.set(id, r);
-    });
-    return [...map.values()].map((r) => ({ ...r, avg: avg(r.scores) })).sort((a, b) => a.avg - b.avg); // lowest first = who needs coaching
-  }, [evals]);
-
-  const overallTone = overall.avg === null ? T.none : scoreTone(overall.avg);
-
   return (
     <>
       <style>{`
@@ -689,44 +523,12 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
           scrollbar-width: none !important;
           -ms-overflow-style: none !important;
         }
-        .qa-root { font-variant-numeric: tabular-nums; }
-        .qa-root button:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
-        .qa-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 22px; }
-        .qa-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); flex: 1; }
-
-        .qa-mobile-menu-btn { display: none; }
-        .qa-sidebar-overlay { display: none; }
-
-        @media (max-width: 860px) {
-          .qa-root { grid-template-columns: 1fr !important; }
-          .qa-sidebar {
-            position: fixed;
-            top: 0; left: 0; bottom: 0;
-            width: 78vw;
-            max-width: 280px;
-            transform: translateX(-100%);
-            transition: transform 0.25s ease;
-            z-index: 100 !important;
-          }
-          .qa-sidebar.qa-sidebar-open { transform: translateX(0); }
-          .qa-mobile-menu-btn { display: inline-flex !important; }
-          .qa-sidebar-overlay.qa-sidebar-open {
-            display: block;
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.55);
-            z-index: 90;
-          }
-          .qa-header { padding-left: 14px !important; padding-right: 14px !important; flex-wrap: wrap !important; }
-          .qa-content { padding: 16px !important; }
-          table { font-size: 9px; }
-        }
       `}</style>
 
-      <div className="qa-root" style={{ display: 'grid', gridTemplateColumns: '270px 1fr', width: '100%', height: '100%', background: 'rgba(10, 12, 20, 0.35)', backdropFilter: 'blur(25px)', border: 'none', borderRadius: '0', boxShadow: 'none', overflow: 'hidden', margin: 0, boxSizing: 'border-box', position: 'relative' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '270px 1fr', width: '100%', height: '100%', background: 'rgba(10, 12, 20, 0.35)', backdropFilter: 'blur(25px)', border: 'none', borderRadius: '0', boxShadow: 'none', overflow: 'hidden', margin: 0, boxSizing: 'border-box', position: 'relative' }}>
 
         {/* LEFT SIDEBAR */}
-        <aside className={`qa-sidebar${sidebarOpen ? ' qa-sidebar-open' : ''}`} style={{ background: 'rgba(12, 14, 24, 0.85)', backdropFilter: 'blur(20px)', borderRight: '1px solid rgba(124, 58, 237, 0.25)', padding: '24px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', zIndex: 2, height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
+        <aside style={{ background: 'rgba(12, 14, 24, 0.85)', backdropFilter: 'blur(20px)', borderRight: '1px solid rgba(124, 58, 237, 0.25)', padding: '24px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', zIndex: 2, height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
           <div>
             <div style={{ textAlign: 'center', marginBottom: '24px' }}>
               <h2 style={{ fontSize: '18px', fontWeight: '900', letterSpacing: '3px', background: 'linear-gradient(135deg, #fff 20%, #c4b5fd 70%, #7c3aed 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
@@ -756,16 +558,17 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               {[
                 { id: 'dashboard', label: 'Dashboard' },
-                { id: 'sales', label: 'Sales Count' },
-                { id: 'overview', label: 'Quality Overview' },
                 { id: 'schedule', label: 'Shift Schedule' },
                 { id: 'attendance', label: 'Attendance Work Log' },
                 { id: 'approvals', label: 'Approvals' },
+                { id: 'sales', label: 'Medicare Sales Portal' },
+                { id: 'salesAchieved', label: 'Sales Achieved' },
+                { id: 'qaScores', label: 'QA Quality Scores' },
                 { id: 'settings', label: 'Account Config' }
               ].map((item) => (
                 <button 
                   key={item.id}
-                  onClick={() => goToTab(item.id)}
+                  onClick={() => setActiveTab(item.id)}
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
@@ -798,14 +601,11 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
           </button>
         </aside>
 
-        <div className={`qa-sidebar-overlay${sidebarOpen ? ' qa-sidebar-open' : ''}`} onClick={() => setSidebarOpen(false)} />
-
         {/* RIGHT MAIN CONTENT AREA */}
         <main style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', zIndex: 2, boxSizing: 'border-box' }}>
           
           {/* Top Header Bar */}
-          <header className="qa-header" style={{ padding: '16px 35px', background: 'rgba(12, 14, 24, 0.65)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(124, 58, 237, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
-            <button className="qa-mobile-menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open menu" style={{ alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '7px', border: '1px solid rgba(124, 58, 237, 0.4)', background: 'rgba(124, 58, 237, 0.12)', color: '#e2e8f0', fontSize: '16px', cursor: 'pointer', marginRight: '4px' }}>☰</button>
+          <header style={{ padding: '16px 35px', background: 'rgba(12, 14, 24, 0.65)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(124, 58, 237, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
               <button 
                 onClick={handleCheckIn}
@@ -855,7 +655,7 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
           </header>
 
           {/* Main Content Body */}
-          <div className="qa-content" style={{ width: '100%', flex: 1, padding: '30px 40px', boxSizing: 'border-box', overflowY: 'auto' }}>
+          <div style={{ width: '100%', flex: 1, padding: '30px 40px', boxSizing: 'border-box', overflowY: 'auto' }}>
             <div style={{ width: '100%', maxWidth: '100%' }}>
               
               {/* Dashboard Tab */}
@@ -863,10 +663,10 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
                   <div style={{ background: 'rgba(18, 21, 36, 0.9)', border: '1px solid rgba(124, 58, 237, 0.3)', borderRadius: '10px', padding: '24px' }}>
                     <h4 style={{ fontSize: '13px', color: '#c4b5fd', margin: '0 0 10px 0', fontWeight: '800', letterSpacing: '1px' }}>
-                      Team Lead Workspace
+                      Medicare Campaign Workspace
                     </h4>
                     <p style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: '1.6', margin: '0 0 16px 0' }}>
-                      Welcome, {userName}. Monitor your team's shift schedule and attendance work logs, and review leave requests sent to you for approval.
+                      Welcome, {userName}. Use the Medicare Sales Portal to record client details and post confirmed enrollments. All submitted sales are sent directly to the Quality Assurance team for review and approval.
                     </p>
                     <span style={{ fontSize: '11px', color: '#a78bfa', fontWeight: '700', fontStyle: 'italic' }}>— Operations Management</span>
                   </div>
@@ -1131,227 +931,304 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
 
-                  {/* Team Leads also review requests sent by their team */}
-                  {isTeamLead && (
-                    <LeaveApprovalsPanel
-                      currentUser={currentUser}
-                      apiBase={API_BASE}
-                      title="Requests Awaiting Your Review"
-                    />
+
+              {/* Medicare Sales Portal Tab */}
+              {activeTab === 'sales' && (
+                <div style={{ background: 'rgba(18, 21, 36, 0.9)', border: '1px solid rgba(124, 58, 237, 0.3)', borderRadius: '10px', padding: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <h3 style={{ fontSize: '15px', color: '#fff', margin: 0, fontWeight: '800' }}>Medicare Campaign Sales Portal</h3>
+                    <span style={{ fontSize: '10px', background: 'rgba(124, 58, 237, 0.2)', color: '#c4b5fd', padding: '4px 10px', borderRadius: '6px', fontWeight: '700', textTransform: 'uppercase' }}>
+                      Option: Send to QA Review
+                    </span>
+                  </div>
+                  <p style={{ margin: '0 0 20px 0', fontSize: '11px', color: '#94a3b8' }}>Capture Medicare prospect details, current coverage, physician preferences, and send the verified sale to QA for final review and approval.</p>
+
+                  {saleMsg.text && (
+                    <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: '700', background: saleMsg.type === 'success' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)', border: saleMsg.type === 'success' ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(239, 68, 68, 0.4)', color: saleMsg.type === 'success' ? '#4ade80' : '#fca5a5' }}>
+                      {saleMsg.text}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleMedicareSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: '700' }}>Customer Full Name:</label>
+                        <input 
+                          type="text" 
+                          name="clientName"
+                          required
+                          value={medicareData.clientName}
+                          onChange={handleMedicareChange}
+                          placeholder="Customer Legal Name"
+                          style={{ background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.3)', color: '#fff', padding: '10px 12px', borderRadius: '6px', fontSize: '12px' }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: '700' }}>Customer Phone Number:</label>
+                        <input 
+                          type="text" 
+                          name="clientPhone"
+                          required
+                          value={medicareData.clientPhone}
+                          onChange={handleMedicareChange}
+                          placeholder="+1 (555) 000-0000"
+                          style={{ background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.3)', color: '#fff', padding: '10px 12px', borderRadius: '6px', fontSize: '12px' }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: '700' }}>Email Address:</label>
+                        <input 
+                          type="email" 
+                          name="clientEmail"
+                          required
+                          value={medicareData.clientEmail}
+                          onChange={handleMedicareChange}
+                          placeholder="client@email.com"
+                          style={{ background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.3)', color: '#fff', padding: '10px 12px', borderRadius: '6px', fontSize: '12px' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: '700' }}>Medicare Eligibility / Parts:</label>
+                        <select 
+                          name="medicarePart"
+                          value={medicareData.medicarePart}
+                          onChange={handleMedicareChange}
+                          style={{ background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.3)', color: '#fff', padding: '10px 12px', borderRadius: '6px', fontSize: '12px' }}
+                        >
+                          <option value="Part A & B">Part A & Part B Active</option>
+                          <option value="Part A Only">Part A Only</option>
+                          <option value="Part B Only">Part B Only</option>
+                          <option value="Qualifying Soon">Turning 65 / Qualifying Soon</option>
+                        </select>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: '700' }}>Current Medicare Plan:</label>
+                        <select 
+                          name="currentPlan"
+                          value={medicareData.currentPlan}
+                          onChange={handleMedicareChange}
+                          style={{ background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.3)', color: '#fff', padding: '10px 12px', borderRadius: '6px', fontSize: '12px' }}
+                        >
+                          <option value="Original Medicare">Original Medicare</option>
+                          <option value="Medicare Advantage (Part C)">Medicare Advantage (Part C)</option>
+                          <option value="Medigap Supplement">Medigap Supplement</option>
+                          <option value="None / First Time">None / First Time Enrollment</option>
+                        </select>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: '700' }}>Sale Value / Commission Tag:</label>
+                        <input 
+                          type="text" 
+                          name="saleAmount"
+                          required
+                          value={medicareData.saleAmount}
+                          onChange={handleMedicareChange}
+                          placeholder="e.g. $250 or Verified Lead"
+                          style={{ background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.3)', color: '#fff', padding: '10px 12px', borderRadius: '6px', fontSize: '12px' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: '700' }}>Primary Doctor / Provider Preference:</label>
+                        <input 
+                          type="text" 
+                          name="primaryDoctor"
+                          value={medicareData.primaryDoctor}
+                          onChange={handleMedicareChange}
+                          placeholder="Doctor name or medical group"
+                          style={{ background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.3)', color: '#fff', padding: '10px 12px', borderRadius: '6px', fontSize: '12px' }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: '700' }}>Current Medications (Formulary):</label>
+                        <input 
+                          type="text" 
+                          name="medicationsList"
+                          value={medicareData.medicationsList}
+                          onChange={handleMedicareChange}
+                          placeholder="List prescription drugs if any"
+                          style={{ background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.3)', color: '#fff', padding: '10px 12px', borderRadius: '6px', fontSize: '12px' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <label style={{ fontSize: '11px', color: '#c4b5fd', fontWeight: '700' }}>Call Notes / Enrollment Details:</label>
+                      <textarea 
+                        name="notes"
+                        rows="2"
+                        value={medicareData.notes}
+                        onChange={handleMedicareChange}
+                        placeholder="Add specific client preferences or call summary notes..."
+                        style={{ background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.3)', color: '#fff', padding: '10px 12px', borderRadius: '6px', fontSize: '12px', resize: 'vertical' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(8, 10, 17, 0.6)', padding: '10px 14px', borderRadius: '6px', border: '1px solid rgba(124, 58, 237, 0.2)' }}>
+                      <input 
+                        type="checkbox"
+                        name="tcpaConsent"
+                        id="tcpaConsent"
+                        checked={medicareData.tcpaConsent}
+                        onChange={handleMedicareChange}
+                        style={{ width: '16px', height: '16px', accentColor: '#7c3aed', cursor: 'pointer' }}
+                      />
+                      <label htmlFor="tcpaConsent" style={{ fontSize: '11px', color: '#cbd5e1', cursor: 'pointer', fontWeight: '600' }}>
+                        <strong style={{ color: '#c4b5fd' }}>TCPA Compliance Check:</strong> Customer has given verbal consent to be contacted regarding Medicare plan options and enrollment processing.
+                      </label>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
+                      <button 
+                        type="submit"
+                        disabled={saleSubmitting}
+                        style={{ background: '#7c3aed', border: 'none', color: '#fff', padding: '10px 24px', borderRadius: '6px', cursor: saleSubmitting ? 'wait' : 'pointer', fontWeight: '700', fontSize: '12px', letterSpacing: '0.5px' }}
+                      >
+                        {saleSubmitting ? 'Sending Sale to QA...' : 'Submit Sale to QA Review'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Sales Achieved Tab */}
+              {activeTab === 'salesAchieved' && (
+                <div style={{ background: 'rgba(18, 21, 36, 0.9)', border: '1px solid rgba(124, 58, 237, 0.3)', borderRadius: '10px', padding: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <div>
+                      <h3 style={{ fontSize: '15px', color: '#fff', margin: '0 0 4px 0', fontWeight: '800' }}>Sales Achieved & QA Approval Status</h3>
+                      <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8' }}>All submitted sales are reviewed by Quality Assurance and marked as approved or pending from their portal queue.</p>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#c4b5fd', background: 'rgba(124, 58, 237, 0.2)', padding: '6px 12px', borderRadius: '6px', fontWeight: '700' }}>
+                      Total Submitted: {salesAchievedList.length}
+                    </span>
+                  </div>
+
+                  {loadingSales ? (
+                    <div style={{ padding: '30px', background: 'rgba(8, 10, 17, 0.6)', borderRadius: '8px', textAlign: 'center' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>Loading your sales from the database...</p>
+                    </div>
+                  ) : salesAchievedList.length > 0 ? (
+                    <div style={{ width: '100%', overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '11px' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid rgba(124, 58, 237, 0.3)', color: '#c4b5fd', fontWeight: '800' }}>
+                            <th style={{ padding: '12px' }}>Sale ID</th>
+                            <th style={{ padding: '12px' }}>Date</th>
+                            <th style={{ padding: '12px' }}>Customer Name</th>
+                            <th style={{ padding: '12px' }}>Customer Number</th>
+                            <th style={{ padding: '12px' }}>Package / Tier</th>
+                            <th style={{ padding: '12px' }}>Amount</th>
+                            <th style={{ padding: '12px' }}>Sale Confirmation Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {salesAchievedList.map((sale, index) => {
+                            const isApproved = sale.qaStatus === 'Approved by QA';
+                            const isRejected = sale.qaStatus === 'Rejected';
+                            return (
+                              <tr key={index} style={{ borderBottom: '1px solid rgba(124, 58, 237, 0.1)', color: '#cbd5e1' }}>
+                                <td style={{ padding: '12px', fontWeight: '700', color: '#c4b5fd' }}>{sale.id}</td>
+                                <td style={{ padding: '12px' }}>{sale.date}</td>
+                                <td style={{ padding: '12px', fontWeight: '700', color: '#fff' }}>{sale.clientName}</td>
+                                <td style={{ padding: '12px', color: '#94a3b8' }}>{sale.clientPhone}</td>
+                                <td style={{ padding: '12px' }}>{sale.packageTier}</td>
+                                <td style={{ padding: '12px', fontWeight: '700', color: '#4ade80' }}>{sale.saleAmount}</td>
+                                <td style={{ padding: '12px' }}>
+                                  <span style={{ 
+                                    padding: '4px 10px', 
+                                    borderRadius: '6px', 
+                                    fontWeight: '800', 
+                                    fontSize: '10px',
+                                    background: isApproved ? 'rgba(34, 197, 94, 0.2)' : isRejected ? 'rgba(239, 68, 68, 0.2)' : 'rgba(234, 179, 8, 0.2)',
+                                    color: isApproved ? '#4ade80' : isRejected ? '#fca5a5' : '#facc15',
+                                    border: isApproved ? '1px solid rgba(34, 197, 94, 0.4)' : isRejected ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(234, 179, 8, 0.4)'
+                                  }}>
+                                    {sale.qaStatus}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '30px', background: 'rgba(8, 10, 17, 0.6)', borderRadius: '8px', textAlign: 'center' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>No sales recorded yet. Submit a sale through the Medicare Sales Portal to send it to the QA queue.</p>
+                    </div>
                   )}
                 </div>
               )}
 
-              {/* Quality Overview (from the QA dashboard) */}
-              {/* Sales Count Tab */}
-              {activeTab === 'sales' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-                  {salesError && <Notice type="error">Could not load posted sales: {salesError}. The backend needs a route that returns every agent's sales (GET /api/sales).</Notice>}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                    <p style={{ ...S.sub, margin: 0 }}>Sales each agent has posted, split by QA result. Weeks run Monday to Sunday.</p>
-                    <button type="button" onClick={loadSales} disabled={salesLoading} style={{ ...S.ghost, opacity: salesLoading ? 0.6 : 1 }}>{salesLoading ? 'Refreshing...' : '↻ Refresh sales'}</button>
+              {/* QA Quality Scores Tab */}
+              {activeTab === 'qaScores' && (
+                <div style={{ background: 'rgba(18, 21, 36, 0.9)', border: '1px solid rgba(124, 58, 237, 0.3)', borderRadius: '10px', padding: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <div>
+                      <h3 style={{ fontSize: '15px', color: '#fff', margin: '0 0 4px 0', fontWeight: '800' }}>QA Quality Call Evaluations & Scores</h3>
+                      <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8' }}>Review evaluated call metrics, compliance scores, and specific feedback left by Quality Assurance supervisors from the database.</p>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#4ade80', background: 'rgba(34, 197, 94, 0.2)', border: '1px solid rgba(34, 197, 94, 0.4)', padding: '6px 12px', borderRadius: '6px', fontWeight: '800' }}>
+                      Average QA Score: {averageQaScore}%
+                    </span>
                   </div>
 
-                  <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '22px' }}>
-                    {SALE_PERIODS.map((p) => {
-                      const t = salesStats.totals[p.id];
-                      return (
-                        <div key={p.id} style={S.card}>
-                          <div style={{ fontSize: '11px', color: C.lav, fontWeight: '800', letterSpacing: '1px' }}>{p.label.toUpperCase()}</div>
-                          <div style={{ fontSize: '34px', fontWeight: '800', color: '#fff', margin: '6px 0 2px' }}>{t.total}</div>
-                          <div style={{ fontSize: '10px', color: C.dim, marginBottom: '14px' }}>sales posted by all agents</div>
-                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                            <Badge tone={T.pass}>{t.approved} approved</Badge>
-                            <Badge tone={T.warn}>{t.pending} pending</Badge>
-                            <Badge tone={T.fail}>{t.rejected} rejected</Badge>
+                  {loadingEvals ? (
+                    <div style={{ padding: '30px', background: 'rgba(8, 10, 17, 0.6)', borderRadius: '8px', textAlign: 'center' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>Loading live evaluations from database...</p>
+                    </div>
+                  ) : qaScoresList.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      {qaScoresList.map((item, index) => (
+                        <div key={item._id || index} style={{ background: 'rgba(8, 10, 17, 0.8)', border: '1px solid rgba(124, 58, 237, 0.25)', borderRadius: '8px', padding: '18px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                              <span style={{ fontSize: '12px', fontWeight: '800', color: '#c4b5fd' }}>{item.qaId || item.id}</span>
+                              <span style={{ fontSize: '11px', color: '#94a3b8' }}>|</span>
+                              <span style={{ fontSize: '12px', fontWeight: '700', color: '#fff' }}>Client: {item.client}</span>
+                              <span style={{ fontSize: '11px', color: '#94a3b8' }}>|</span>
+                              <span style={{ fontSize: '11px', color: '#cbd5e1' }}>{item.date}</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                              <span style={{ fontSize: '10px', background: 'rgba(124, 58, 237, 0.25)', color: '#e9d5ff', padding: '3px 8px', borderRadius: '4px', fontWeight: '700' }}>
+                                Adherence: {item.adherence}
+                              </span>
+                              <span style={{ fontSize: '11px', background: 'rgba(34, 197, 94, 0.2)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '4px 10px', borderRadius: '6px', fontWeight: '800' }}>
+                                Score: {item.score}%
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </section>
 
-                  <section style={S.card}>
-                    <h3 style={S.h3}>Sales per agent</h3>
-                    <p style={{ ...S.sub, marginBottom: '16px' }}>Posted = every sale the agent submitted. Pending means QA has not approved or rejected it yet.</p>
-                    {salesStats.undated > 0 && <Notice type="error">{salesStats.undated} posted sale{salesStats.undated === 1 ? ' has' : 's have'} no readable date, so {salesStats.undated === 1 ? 'it is' : 'they are'} left out of these counts.</Notice>}
-                    {salesLoading && sales.length === 0 ? (
-                      <Empty>Loading posted sales from the database...</Empty>
-                    ) : salesStats.list.length === 0 ? (
-                      <Empty>No sales have been posted yet.</Empty>
-                    ) : (
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={S.table}>
-                          <thead>
-                            <tr style={S.thead}>
-                              <th rowSpan={2} style={{ padding: '12px' }}>Agent</th>
-                              {SALE_PERIODS.map((p) => (
-                                <th key={p.id} colSpan={4} style={{ padding: '12px', textAlign: 'center', borderLeft: `1px solid ${C.line}` }}>{p.label}</th>
-                              ))}
-                            </tr>
-                            <tr style={S.thead}>
-                              {SALE_PERIODS.flatMap((p) => SALE_COLS.map((c, i) => (
-                                <th key={`${p.id}-${c.id}`} style={{ padding: '8px 12px', textAlign: 'center', color: c.color, borderLeft: i === 0 ? `1px solid ${C.line}` : undefined }}>{c.label}</th>
-                              )))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {salesStats.list.map((r) => (
-                              <tr key={r.id} style={S.row}>
-                                <td style={{ padding: '12px', color: '#fff', fontWeight: '700', whiteSpace: 'nowrap' }}>{r.name}</td>
-                                {SALE_PERIODS.flatMap((p) => SALE_COLS.map((c, i) => (
-                                  <td key={`${p.id}-${c.id}`} style={{ padding: '12px', textAlign: 'center', color: r[p.id][c.id] ? c.color : C.dim, fontWeight: c.id === 'total' ? '800' : '600', borderLeft: i === 0 ? `1px solid ${C.line}` : undefined }}>{r[p.id][c.id]}</td>
-                                )))}
-                              </tr>
-                            ))}
-                            <tr style={{ ...S.row, borderTop: `1px solid ${C.line}`, background: 'rgba(124, 58, 237, 0.08)' }}>
-                              <td style={{ padding: '12px', color: C.lav, fontWeight: '800' }}>All agents</td>
-                              {SALE_PERIODS.flatMap((p) => SALE_COLS.map((c, i) => (
-                                <td key={`${p.id}-${c.id}`} style={{ padding: '12px', textAlign: 'center', color: c.color, fontWeight: '800', borderLeft: i === 0 ? `1px solid ${C.line}` : undefined }}>{salesStats.totals[p.id][c.id]}</td>
-                              )))}
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </section>
-
-                  <section style={S.card}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
-                      <div>
-                        <h3 style={S.h3}>Daily breakdown</h3>
-                        <p style={S.sub}>Last 14 days, newest first.</p>
-                      </div>
-                      <select value={salesAgent} onChange={(e) => setSalesAgent(e.target.value)} style={S.input} aria-label="Choose an agent">
-                        <option value="all">All agents</option>
-                        {salesStats.list.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
-                      </select>
-                    </div>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table style={S.table}>
-                        <thead>
-                          <tr style={S.thead}>
-                            <th style={{ padding: '12px' }}>Day</th>
-                            {SALE_COLS.map((c) => <th key={c.id} style={{ padding: '12px', textAlign: 'center', color: c.color }}>{c.label}</th>)}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {dailyRows.map((d) => (
-                            <tr key={d.key} style={S.row}>
-                              <td style={{ padding: '10px 12px', color: '#fff', fontWeight: '700', whiteSpace: 'nowrap' }}>{d.label}</td>
-                              {SALE_COLS.map((c) => (
-                                <td key={c.id} style={{ padding: '10px 12px', textAlign: 'center', color: d.counts[c.id] ? c.color : C.dim, fontWeight: c.id === 'total' ? '800' : '600' }}>{d.counts[c.id]}</td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                </div>
-              )}
-
-              {activeTab === 'overview' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-                  {evalsError && <Notice type="error">Could not load evaluations: {evalsError}{/404/.test(evalsError) ? ' The server has no GET /api/evaluations route yet. It needs one that returns every evaluation.' : ''}</Notice>}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button type="button" onClick={loadEvals} disabled={evalsLoading} style={{ ...S.ghost, opacity: evalsLoading ? 0.6 : 1 }}>{evalsLoading ? 'Refreshing...' : '↻ Refresh QA data'}</button>
-                  </div>
-                  <section style={{ ...S.card, display: 'flex', alignItems: 'center', gap: '28px', flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '22px' }}>
-                      <ScoreRing value={overall.avg} tone={overallTone} />
-                      <div style={{ maxWidth: '190px' }}>
-                        <h3 style={S.h3}>Overall call quality</h3>
-                        <p style={S.sub}>Average score across every call QA has rated.</p>
-                        <div style={{ marginTop: '10px' }}>
-                          {overall.avg === null ? <Badge tone={T.none}>No calls rated yet</Badge> : <Badge tone={overallTone}>{resultFor(overall.avg, false)}</Badge>}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="qa-stats">
-                      {[
-                        { label: 'Calls rated', value: overall.total, note: `${overall.week} this week` },
-                        { label: 'This week', value: overall.weekAvg === null ? '—' : `${overall.weekAvg}%`, note: 'Average score' },
-                        { label: 'Pass rate', value: overall.passRate === null ? '—' : `${overall.passRate}%`, note: '75%+ and no critical fail' },
-                        { label: 'Critical fails', value: overall.critical, note: 'Compliance rule broken', color: overall.critical ? T.fail.fg : '#fff' }
-                      ].map((s) => (
-                        <div key={s.label} style={{ padding: '4px 18px', borderLeft: `1px solid ${C.line}` }}>
-                          <div style={{ fontSize: '11px', color: C.muted, fontWeight: '700' }}>{s.label}</div>
-                          <div style={{ fontSize: '26px', fontWeight: '800', color: s.color || '#fff', margin: '2px 0' }}>{s.value}</div>
-                          <div style={{ fontSize: '10px', color: C.dim }}>{s.note}</div>
+                          <div style={{ background: 'rgba(20, 24, 41, 0.5)', padding: '12px 14px', borderRadius: '6px', border: '1px solid rgba(124, 58, 237, 0.15)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <span style={{ fontSize: '10px', color: '#c4b5fd', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                              QA Evaluator Notes ({item.evaluator || 'Supervisor'}):
+                            </span>
+                            <p style={{ margin: 0, fontSize: '11px', color: '#cbd5e1', lineHeight: '1.5' }}>
+                              {item.notes}
+                            </p>
+                          </div>
                         </div>
                       ))}
                     </div>
-                  </section>
-
-                  <div className="qa-two">
-                    <section style={S.card}>
-                      <h3 style={S.h3}>Weekly quality trend</h3>
-                      <p style={{ ...S.sub, marginBottom: '14px' }}>Average score per week. Dashed lines mark 90 (excellent) and 75 (good).</p>
-                      {trend.length === 0 ? <Empty>Rate a call to start the trend.</Empty> : <TrendChart data={trend} />}
-                    </section>
-
-                    <section style={S.card}>
-                      <h3 style={S.h3}>Most missed standards</h3>
-                      <p style={{ ...S.sub, marginBottom: '16px' }}>Share of rated calls where the standard was failed. Coach the top ones first.</p>
-                      {missed.length === 0 ? (
-                        <Empty>Appears once calls are rated with the checklist.</Empty>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '13px' }}>
-                          {missed.map((m) => (
-                            <div key={m.id}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', fontSize: '11px', marginBottom: '5px', color: '#e2e8f0' }}>
-                                <span>{m.label}{m.critical && <span style={{ color: T.fail.fg, fontWeight: '800' }}> (critical)</span>}</span>
-                                <strong style={{ color: m.rate >= 25 ? T.fail.fg : C.muted }}>{m.rate}%</strong>
-                              </div>
-                              <div style={{ height: '6px', background: C.soft, borderRadius: '3px' }}>
-                                <div style={{ width: `${m.rate}%`, height: '100%', background: m.rate >= 25 ? '#f87171' : '#a78bfa', borderRadius: '3px' }} />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </section>
-                  </div>
-
-                  <section style={S.card}>
-                    <h3 style={S.h3}>Agent quality</h3>
-                    <p style={{ ...S.sub, marginBottom: '14px' }}>Lowest average first, so agents who need coaching are at the top.</p>
-                    {evalsLoading && agentRows.length === 0 ? (
-                      <Empty>Loading evaluations...</Empty>
-                    ) : agentRows.length === 0 ? (
-                      <Empty>No agents have been rated yet.</Empty>
-                    ) : (
-                      <div style={{ width: '100%', overflowX: 'auto' }}>
-                        <table style={S.table}>
-                          <thead>
-                            <tr style={S.thead}>{['Agent', 'Calls rated', 'Average score', 'Critical fails', 'Last rated'].map((h, i) => <th key={i} style={{ padding: '10px' }}>{h}</th>)}</tr>
-                          </thead>
-                          <tbody>
-                            {agentRows.map((a) => (
-                              <tr key={a.id} style={S.row}>
-                                <td style={{ padding: '10px' }}>
-                                  <span style={{ fontWeight: '700', color: '#fff' }}>{a.name}</span>
-                                  {a.name !== a.id && <span style={{ color: C.muted, marginLeft: '8px' }}>{a.id}</span>}
-                                </td>
-                                <td style={{ padding: '10px' }}>{a.scores.length}</td>
-                                <td style={{ padding: '10px', minWidth: '170px' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                    <div style={{ flex: 1, height: '6px', background: C.soft, borderRadius: '3px' }}>
-                                      <div style={{ width: `${a.avg}%`, height: '100%', background: scoreTone(a.avg).fg, borderRadius: '3px' }} />
-                                    </div>
-                                    <strong style={{ width: '38px', color: scoreTone(a.avg).fg }}>{a.avg}%</strong>
-                                  </div>
-                                </td>
-                                <td style={{ padding: '10px', fontWeight: '700', color: a.critical ? T.fail.fg : C.muted }}>{a.critical}</td>
-                                <td style={{ padding: '10px' }}>{a.last || '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </section>
+                  ) : (
+                    <div style={{ padding: '30px', background: 'rgba(8, 10, 17, 0.6)', borderRadius: '8px', textAlign: 'center' }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8' }}>No QA quality evaluations found in the database for your account.</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1369,7 +1246,7 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
 
                   <div style={{ background: 'rgba(18, 21, 36, 0.9)', border: '1px solid rgba(124, 58, 237, 0.3)', borderRadius: '10px', padding: '24px' }}>
                     <h3 style={{ fontSize: '15px', color: '#fff', marginTop: 0, fontWeight: '800', marginBottom: '6px' }}>Secure Password Change</h3>
-                    <p style={{ margin: '0 0 20px 0', fontSize: '11px', color: '#94a3b8' }}>Send a password change request to the administrator.</p>
+                    <p style={{ margin: '0 0 20px 0', fontSize: '11px', color: '#94a3b8' }}>Update your authentication credentials directly in the main database.</p>
 
                     {passwordMsg.text && (
                       <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: '700', background: passwordMsg.type === 'success' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)', border: passwordMsg.type === 'success' ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(239, 68, 68, 0.4)', color: passwordMsg.type === 'success' ? '#4ade80' : '#fca5a5' }}>
@@ -1439,5 +1316,4 @@ export default function TeamLeadDashboard({ currentUser, onSignOut }) {
       </div>
     </>
   );
-  
 }
